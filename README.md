@@ -85,4 +85,18 @@ function [center, U, obj_fcn] = fcm(data, cluster_n, options)
   obj_fcn(iter_n+1:max_iter) = [];
 end
 
+function U = initfcm(cluster_n, data_n)
+  U = rand(cluster_n, data_n);
+  col_sum = sum(U);
+  U = U./col_sum(ones(cluster_n, 1), :);
+end
+
+function [U_new, center, obj_fcn] = stepfcm(data, U, cluster_n, expo)
+  mf = U.^expo;       % MF matrix after exponential modification
+  center = mf*data./(sum(mf,2)*ones(1,size(data,2))); %new center
+  dist = distfcm(center, data);       % fill the distance matrix
+  obj_fcn = sum(sum((dist.^2).*mf));  % objective function
+  tmp = dist.^(-2/(expo-1));      % calculate new U, suppose expo != 1
+  U_new = tmp./(ones(cluster_n, 1)*sum(tmp));
+end
 ```
