@@ -28,14 +28,12 @@
 static void SetSysClock(void);
 void usart2_init(uint32_t pclk1,uint32_t bound);
 void delay_ms(uint16_t time);
-void TIM9_init(uint32_t pclk1, uint32_t freq);
 void TIM10_init(uint32_t pclk1, uint32_t freq);
 void Send_buffer(int8_t *buff, uint16_t count);
 void TIM3_init(void);
-void TIM4_init(void);
 void TIM3_PA6_Duty_cycle(uint8_t duty);
 void TIM3_PA7_Duty_cycle(uint8_t duty);
-int8_t read_encoder(void);
+void ADC1_IN10_Config(void);
 
 enum PIN{
 	PIN0, PIN1, PIN2, PIN3, 
@@ -53,8 +51,8 @@ int main()
 	SetSysClock();
 	usart2_init(APB1, USART_BAUDRATE);
 	TIM3_init();
-	TIM4_init();
 	TIM10_init(APB2_TIM, 100);
+	ADC1_IN10_Config();
 	while(1)
 	{
 	}
@@ -63,7 +61,7 @@ int main()
 //#define USART_BAUDRATE 19200
 #define BUFFER_LENGTH 3
 uint16_t buffer_size, current_send_byte;
-uint8_t buffer[BUFFER_LENGTH];
+int8_t buffer[BUFFER_LENGTH];
 
 void USART2_IRQHandler(void)
 {
@@ -93,8 +91,8 @@ void USART2_IRQHandler(void)
 			Rotating_speed = (0xff - Rotating_speed + 1);
 			TIM3_PA7_Duty_cycle(0);
 			TIM3_PA6_Duty_cycle(Rotating_speed);
-			GPIOA->BSRR |= GPIO_BSRR_BR5;
-			GPIOA->BSRR |= GPIO_BSRR_BS8;
+			GPIOA->BSRR |= GPIO_BSRR_BR8;
+			GPIOA->BSRR |= GPIO_BSRR_BS5;
 		}
 		else if(Rotating_speed == 0)
 		{
@@ -107,8 +105,8 @@ void USART2_IRQHandler(void)
 		{
 			TIM3_PA6_Duty_cycle(0);
 			TIM3_PA7_Duty_cycle(Rotating_speed);
-			GPIOA->BSRR |= GPIO_BSRR_BR8;
-			GPIOA->BSRR |= GPIO_BSRR_BS5;
+			GPIOA->BSRR |= GPIO_BSRR_BR5;
+			GPIOA->BSRR |= GPIO_BSRR_BS8;
 		}
     }
 }
@@ -138,23 +136,7 @@ void delay_ms(uint16_t time)
   }
 }
 
-void TIM1_BRK_TIM9_IRQHandler(void)
-{
-	TIM9->SR &= ~TIM_SR_UIF;
-	
-	if(!(GPIOB->IDR & GPIO_IDR_ID0))
-	{
-		GPIOA->BSRR |= GPIO_BSRR_BS9;
-		GPIOA->BSRR |= GPIO_BSRR_BR10;
-	}
-	else
-	{
-		GPIOA->BSRR |= GPIO_BSRR_BS10;
-		GPIOA->BSRR |= GPIO_BSRR_BR9;
-	}
-}
 
-#define M_PI 3.14159265358979323846
 void TIM1_UP_TIM10_IRQHandler(void)
 {
 	TIM10->SR &= ~TIM_SR_UIF;
@@ -165,7 +147,7 @@ void TIM1_UP_TIM10_IRQHandler(void)
 	
 	USART2_RX_BUF[0] = 'A';
 	USART2_RX_BUF[1] = i;
-	USART2_RX_BUF[2] = read_encoder();
+	USART2_RX_BUF[2] = (int8_t)ADC1->DR;
 	
 	USART2->CR1 |= USART_CR1_TXEIE;
 	Send_buffer(USART2_RX_BUF, BUFFER_LENGTH);
@@ -197,57 +179,6 @@ void TIM3_PA7_Duty_cycle(uint8_t duty)
 {
 	TIM3->CCR2 = duty*100;		// Duty cycle 80%
 }
-void TIM4_init(void)
-{
-	// init TIM4
-	RCC->APB1ENR |= RCC_APB1ENR_TIM4EN;		//TIM4 clock enabled
-	GPIOB->MODER |= 1 << (PIN6*2 + 1) | 1 << (PIN7*2 + 1); ; // Reuse output mode
-	GPIOB->AFR[0] |= (uint32_t)0x22000000; // Reuse as TIM4
-	TIM4->ARR = 255;
-	// channel is configured as input,IC1 is mapped on TI1,IC2 is mapped on TI2
-	TIM4->CCMR1 &= 0xFCFC;
-	/*!<CC1S[1:0] bits (Capture/Compare 1 Selection) */
-	TIM4->CCMR1 |= TIM_CCMR1_CC1S_0;
-	TIM4->CCMR1 |= TIM_CCMR1_CC2S_0;
-
-	TIM4->CCER |= TIM_CCER_CC1E;	// Enable comparison output
-	TIM4->CCER |= TIM_CCER_CC2E;
-	
-	// Encoder mode 3 Counter counts up/down on both TI1FP1 and TI2FP2 edges 
-	// depending on the level of the other input.
-	TIM4->SMCR &= 0xFFF8;
-	/*!<SMS[2:0] bits (Slave mode selection)    */
-	TIM4->SMCR |= TIM_SMCR_SMS_0;
-	TIM4->SMCR |= TIM_SMCR_SMS_1;
-
-	TIM4->CNT = 0;
-
-	TIM4->CR1 |= TIM_CR1_CEN;		// Counter enable
-}
-
-int8_t read_encoder(void)
-{
-	int8_t encoder_num = 0;
-	encoder_num = (int8_t)TIM4 ->CNT;
-	
-	return encoder_num;
-}
-
-void TIM9_init(uint32_t pclk1, uint32_t freq)
-{
-	// init TIM9
-	RCC->APB2ENR |= RCC_APB2ENR_TIM9EN;			//TIM9 clock enabled
-	TIM9->PSC &= ~TIM_PSC_PSC;
-	TIM9->PSC = pclk1/(freq*1000) -1;			// Makes the counting frequency 1KHz	T = 1ms
-	TIM9->CNT = 0;								// Counter clear
-	TIM9->ARR = 1000;
-	// TIM9->CR1 |= TIM_CR1_ARPE;				// Automatic reload preload enable
-	TIM9->DIER |= TIM_DIER_UIE;					// Update interrupt enable
-	
-	NVIC_EnableIRQ(TIM1_BRK_TIM9_IRQn);
-	
-	TIM9->CR1 |= TIM_CR1_CEN;					// Counter enable
-}
 
 void TIM10_init(uint32_t pclk1, uint32_t freq)
 {
@@ -263,6 +194,27 @@ void TIM10_init(uint32_t pclk1, uint32_t freq)
 	
 	TIM10->CR1 |= TIM_CR1_CEN;					// Counter enable
 }
+
+
+void ADC1_IN10_Config(void)
+{
+	RCC->AHB1ENR |= RCC_AHB1ENR_GPIOCEN;
+	GPIOC->MODER |= 0x3 << PIN0;		//	Analog mode
+	GPIOC->PUPDR &= ~GPIO_PUPDR_PUPD0;	//	No pull-up, pull-down 
+
+	/***ADC1***/
+	RCC->APB2ENR |= RCC_APB2ENR_ADC1EN;
+	// Because there is only one replacement, find SQ1 first.
+	// Then correspond to the corresponding channel number.
+	ADC1->SQR3 = 10 << ADC_SQR3_SQ1_Pos;			//	The first channel is ADC1_in10
+	ADC1->CR1 &= 0x00000000;
+	ADC1->CR1 |= ADC_CR1_RES_1;			// Set to 8-bit resolution
+	ADC1->CR2 &= 0x00000000;  
+	ADC1->CR2 |= ADC_CR2_CONT;			/*!<Continuous Conversion */
+	ADC1->CR2 |= ADC_CR2_ADON;			/*!<A/D Converter ON*/
+	ADC1->CR2 |= ADC_CR2_SWSTART;		/*!<Start Conversion of regular channels */
+}
+
 // Init USART2
 // pclk1:PLL clock frequency
 // bound:USART2 Baud rate
@@ -333,7 +285,6 @@ static void SetSysClock(void)
 		{}
 	}
 }
-
 
 
 ```
